@@ -23,6 +23,10 @@ SALEOR_GRAPHQL_URL = os.getenv("SALEOR_GRAPHQL_URL", "").rstrip("/")
 SALEOR_APP_TOKEN = os.getenv("SALEOR_APP_TOKEN", "")
 SALEOR_MCP_URL = os.getenv("SALEOR_MCP_URL", "").rstrip("/")
 
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+JOYOPC_TEXT_MODEL = os.getenv("JOYOPC_TEXT_MODEL", "gpt-4.1-mini")
+
 
 def upsert_dotenv(updates: dict[str, str], *, path: Path | None = None) -> Path:
     """Write non-secret identifiers and secrets to the local gitignored .env only."""

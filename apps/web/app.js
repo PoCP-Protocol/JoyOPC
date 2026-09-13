@@ -51,7 +51,7 @@ async function loadProducts(){
     btn.disabled=true;
     try{
       const r=await getJSON(`/api/channels/shopify/publish_master/${btn.dataset.publishShopify}`,{method:'POST'});
-      alert(`${r.status}: ${r.master_sku}\n${(r.data&&r.data.admin_url)||r.message||r.listing_status}`);
+      alert(`${r.status}: ${r.master_sku||''}\n${r.admin_url||(r.data&&r.data.admin_url)||r.reason||r.listing_status||''}`);
       await loadProducts();
     }catch(err){alert(String(err));}
     finally{btn.disabled=false;}
@@ -232,6 +232,32 @@ function bindCommerceActions(){
   document.querySelectorAll('[data-sync-channel]').forEach(btn=>btn.onclick=async()=>{
     btn.disabled=true; try{ const d=await getJSON(`/api/channels/${btn.dataset.syncChannel}/orders/sync`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({since_hours:72})}); setResult('#sync-result',`订单同步：${d.status} · received ${d.received||0} · written ${d.written||0}`,d.status==='DONE'); await Promise.all([loadCommerce(),loadDashboard()]); } finally {btn.disabled=false}
   });
+}
+
+function initShopifyChannel(){
+  const form=$('#shopify-connect-form');
+  if(!form) return;
+  form.addEventListener('submit',async e=>{
+    e.preventDefault();
+    const f=new FormData(form);
+    setResult('#shopify-connect-result','正在检测 Shopify Admin API…');
+    try{
+      const d=await getJSON('/api/channels/shopify/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({shop_url:f.get('shop_url'),access_token:f.get('access_token')})});
+      form.querySelector('[name="access_token"]').value='';
+      setResult('#shopify-connect-result',`已连接 ${esc(d.shop&&d.shop.name||d.status)} · ${esc(d.store_domain||'')}`,d.status==='CONNECTED');
+      await loadCommerce();
+    }catch(err){setResult('#shopify-connect-result',String(err),false)}
+  });
+  const first=$('#shopify-publish-first');
+  if(first) first.onclick=async()=>{
+    setResult('#shopify-connect-result','正在把第一条 Master Product 打成 Shopify Draft…');
+    try{
+      const d=await getJSON('/api/channels/shopify/publish-first-master',{method:'POST'});
+      const ok=['SUBMITTED','PUBLISHED'].includes(d.status);
+      setResult('#shopify-connect-result',`${d.status}: ${d.master_sku||''} ${d.admin_url||d.external_listing_id||d.reason||''}`,ok);
+      await Promise.all([loadCommerce(),loadProducts()]);
+    }catch(err){setResult('#shopify-connect-result',String(err),false)}
+  };
 }
 
 function initCommerce(){

@@ -21,7 +21,9 @@ def test_draft_payload_is_unpublished():
     assert payload["variants"][0]["price"] == "69.00"
 
 
-def test_shopify_publish_stays_draft_without_credentials():
+def test_shopify_publish_stays_draft_without_credentials(monkeypatch):
+    monkeypatch.delenv("SHOPIFY_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("SHOPIFY_SHOP_URL", raising=False)
     with TestClient(app) as client:
         response = client.post("/api/channels/shopify/publish_product", json={"sku": "JOY-AI-001", "name": "AI Story Teddy", "retail_price": 69})
     assert response.status_code == 200
@@ -34,3 +36,15 @@ def test_connect_rejects_invalid_credentials():
     with TestClient(app) as client:
         response = client.post("/api/channels/shopify/connect", json={"shop_url": "demo-store", "access_token": "invalid"})
     assert response.status_code == 400
+
+
+def test_publish_first_master_dry_run(monkeypatch):
+    monkeypatch.delenv("SHOPIFY_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("SHOPIFY_SHOP_URL", raising=False)
+    with TestClient(app) as client:
+        response = client.post("/api/channels/shopify/publish-first-master")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "DRY_RUN"
+    assert body["master_sku"]
+    assert body["listing_status"] == "DRY_RUN"
