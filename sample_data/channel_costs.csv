@@ -1,0 +1,4 @@
+channel,market,cost_type,amount,currency,external_order_id,order_no,sku,source,source_ref
+Mock,US,PLATFORM_FEE,15,USD,mock-order-1001,,JOY-AI-001,Mock Settlement,mock-settlement-1001
+Mock,US,AD_SPEND,20,USD,mock-order-1001,,JOY-AI-001,Mock Ads,mock-ads-1001
+Mock,US,SHIPPING,10,USD,mock-order-1001,,JOY-AI-001,Mock 3PL,mock-3pl-1001

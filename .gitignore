@@ -1,0 +1,14 @@
+.venv/
+**/__pycache__/
+**/*.pyc
+*.db
+.env
+apps/api/joyopc.db
+vendor/saleor-platform/
+vendor/saleor-mcp/
+vendor/open-listing-studio/
+vendor/openlinker/
+.pytest_cache/
+.mypy_cache/
+apps/api/storage/uploads/
+*.log

@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: joyopc
+      POSTGRES_PASSWORD: joyopc
+      POSTGRES_DB: joyopc
+    ports:
+      - "5432:5432"
+    volumes:
+      - joyopc_pg:/var/lib/postgresql/data
+
+volumes:
+  joyopc_pg:
