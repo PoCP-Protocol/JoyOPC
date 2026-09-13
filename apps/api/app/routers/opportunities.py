@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.discovery_engine import CandidateIntelligenceEngine
 from app.models import AgentTask, ChannelListing, MarketSignal, MasterProduct, ProductCandidate, Supplier, SupplierProduct
+from app.product_unit import candidate_orm_kwargs, copy_unit, dump_json_list, unit_api_dict
 from app.schemas import CandidateCreate, CandidateDecision, MarketSignalCreate, SelectionPolicy, TaskDecision
 
 router = APIRouter(tags=["opportunity-intelligence"])
@@ -44,6 +45,8 @@ def _apply_evaluation(candidate: ProductCandidate, db: Session) -> ProductCandid
     candidate.rationale = "；".join(selection.reasons)
     candidate.next_actions = "；".join(selection.recommended_actions)
     candidate.evaluated_at = datetime.utcnow()
+    candidate.cert_gap_json = dump_json_list(selection.cert_gap)
+    candidate.needs_hardware_gate = selection.needs_hardware_gate
     return candidate
 
 
@@ -70,6 +73,7 @@ def _candidate_dict(row: ProductCandidate) -> dict:
         "rationale": row.rationale,
         "next_actions": row.next_actions,
         "promoted_master_product_id": row.promoted_master_product_id,
+        "product_unit": unit_api_dict(row, market=row.market),
     }
 
 
@@ -105,6 +109,7 @@ def _promote(db: Session, candidate: ProductCandidate) -> MasterProduct:
         )
         db.add(product)
         db.flush()
+        copy_unit(candidate, product)
     supplier = db.scalar(select(Supplier).where(Supplier.name == candidate.supplier_name))
     if supplier is None:
         supplier = Supplier(name=candidate.supplier_name or "Unknown Supplier")
@@ -235,7 +240,7 @@ def list_candidates(db: Session = Depends(get_db)) -> list[dict]:
 @router.post("/api/candidates")
 def create_candidate(payload: CandidateCreate, db: Session = Depends(get_db)) -> dict:
     count = db.scalar(select(func.count()).select_from(ProductCandidate)) or 0
-    row = ProductCandidate(candidate_code=f"CAND-{count + 1:03d}", **payload.model_dump())
+    row = ProductCandidate(candidate_code=f"CAND-{count + 1:03d}", **candidate_orm_kwargs(payload.model_dump()))
     db.add(row)
     db.flush()
     _apply_evaluation(row, db)

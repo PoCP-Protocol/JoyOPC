@@ -24,6 +24,11 @@ def test_foundation_endpoint():
     assert "Shopify" in channels
     assert "Amazon" in channels
     assert "TikTok Shop" in channels
+    oss_ids = {row["id"] for row in body["opensource"]["packages"]}
+    assert "kuberiva-oms" in oss_ids
+    assert "python-amazon-sp-api" in oss_ids
+    assert "ai-ecommerce-media-studio" in oss_ids
+    assert "product-card-processor" in oss_ids
 
 
 def test_saleor_webhook():

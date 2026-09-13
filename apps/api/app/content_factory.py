@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.adapters.ai_provider import ai_provider
+from app.listing_limits import enforce_amazon_copy
 
 
 def _bullets(name: str, features: list[str]) -> list[str]:
@@ -53,7 +54,7 @@ class ContentFactory:
             local,
         )
         listings = {
-            "amazon": generated.get("amazon") or local["amazon"],
+            "amazon": enforce_amazon_copy(generated.get("amazon") or local["amazon"]),
             "shopify": generated.get("shopify") or local["shopify"],
             "tiktok_shop": generated.get("tiktok_shop") or local["tiktok_shop"],
         }

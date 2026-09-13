@@ -30,6 +30,15 @@ HEADER_ALIASES = {
     "compliance_risk": ["compliance_risk", "合规风险"],
     "return_risk": ["return_risk", "退货风险"],
     "cash_cycle_days": ["cash_cycle_days", "周转天数", "资金周转天数"],
+    "has_persona": ["has_persona", "人格", "有人格"],
+    "memory_enabled": ["memory_enabled", "记忆", "记忆开启"],
+    "soul_recipe_id": ["soul_recipe_id", "魂配方", "soul"],
+    "hw_gen": ["hw_gen", "硬件代际", "gen"],
+    "module_tier": ["module_tier", "模组档位"],
+    "shell": ["shell", "外形壳", "外形"],
+    "claimed_features": ["claimed_features", "硬件特征", "features"],
+    "certs_held": ["certs_held", "已有认证", "认证"],
+    "skills": ["skills", "技能"],
 }
 
 MARKET_ALIASES = {
@@ -148,6 +157,15 @@ class SupplierCatalogImporter:
                 "compliance_risk": _float(get("compliance_risk"), 35),
                 "return_risk": _float(get("return_risk"), 35),
                 "cash_cycle_days": _int(get("cash_cycle_days"), 30),
+                "soul_recipe_id": str(get("soul_recipe_id", "") or "").strip(),
+                "has_persona": _bool(get("has_persona")),
+                "memory_enabled": _bool(get("memory_enabled")),
+                "skills": str(get("skills", "") or ""),
+                "hw_gen": max(1, min(4, _int(get("hw_gen"), 1) or 1)),
+                "module_tier": str(get("module_tier", "Mini") or "Mini").strip(),
+                "shell": str(get("shell", "") or "").strip(),
+                "claimed_features": str(get("claimed_features", "") or ""),
+                "certs_held": str(get("certs_held", "") or ""),
             }
             out.append(SupplierImportRecord(normalized=normalized, raw={str(k): v for k, v in row.items()}))
         return out

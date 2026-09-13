@@ -8,5 +8,7 @@ openpyxl>=3.1,<4.0
 pypdf>=6.0,<7.0
 Pillow>=11.0,<13.0
 httpx>=0.28,<1.0
+python-amazon-sp-api>=1.9,<3.0
 pytrends>=4.9,<5.0
 psycopg[binary]>=3.2,<4.0
+alembic>=1.16,<2.0

@@ -33,6 +33,12 @@ class MockChannelAdapter(ChannelAdapter):
     async def update_inventory(self, external_listing_id: str, quantity: int, *, external_variant_id: str = "") -> dict[str, Any]:
         return {"status": "UPDATED", "listing": external_listing_id, "quantity": quantity}
 
+    async def acknowledge_order(self, external_order_id: str) -> dict[str, Any]:
+        return {"status": "ACKNOWLEDGED", "order": external_order_id}
+
+    async def ship_order(self, external_order_id: str, tracking_no: str) -> dict[str, Any]:
+        return {"status": "SHIPPED", "order": external_order_id, "tracking": tracking_no}
+
     async def pull_orders(self, *, since_iso: str | None = None) -> list[dict[str, Any]]:
         now = datetime.now(timezone.utc).isoformat()
         return [

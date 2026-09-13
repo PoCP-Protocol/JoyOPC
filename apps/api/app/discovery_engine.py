@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .models import MarketSignal, ProductCandidate
+from .product_unit import unit_from_orm
 from .schemas import SelectionInput, SelectionPolicy
 from .selection_engine import ProductZoneEngine
 
@@ -48,6 +49,7 @@ class CandidateIntelligenceEngine:
         margin = self.expected_margin_pct(candidate.target_retail_price, candidate.estimated_landed_cost)
         market_demand = self.blended_market_demand(signals, candidate.market_demand)
         competition = self.blended_competition(signals, candidate.competition_intensity)
+        unit = unit_from_orm(candidate, market=candidate.market)
         payload = SelectionInput(
             product_name=candidate.product_name,
             exclusive_rights=candidate.exclusive_rights,
@@ -63,6 +65,17 @@ class CandidateIntelligenceEngine:
             compliance_risk=candidate.compliance_risk,
             return_risk=candidate.return_risk,
             cash_cycle_days=candidate.cash_cycle_days,
+            market=candidate.market or "US",
+            recommended_channel=candidate.recommended_channel or "TikTok Shop",
+            soul_recipe_id=unit.soul_recipe_id,
+            has_persona=unit.has_persona,
+            memory_enabled=unit.memory_enabled,
+            skills=unit.skills,
+            hw_gen=unit.hw_gen,
+            module_tier=unit.module_tier,
+            shell=unit.shell,
+            claimed_features=unit.claimed_features,
+            certs_held=unit.certs_held,
         )
         result = ProductZoneEngine(self.policy).evaluate(payload)
         return {

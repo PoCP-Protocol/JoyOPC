@@ -18,3 +18,9 @@ class SaleorAdapter:
         if not self.graphql_url:
             return {"connected": False, "kernel": "saleor", "reason": "SALEOR_GRAPHQL_URL not configured"}
         return {"connected": False, "kernel": "saleor", "reason": "V0.1 adapter boundary only"}
+
+    def ingest_webhook(self, event: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return {"accepted": True, "event": event, "order_id": payload.get("id")}
+
+
+saleor_adapter = SaleorAdapter()

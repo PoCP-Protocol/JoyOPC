@@ -15,25 +15,26 @@
       <button class="nav" data-view="datahub">真实数据中心</button>
       <button class="nav" data-view="commerce">渠道与利润</button>
       <button class="nav" data-view="products">Products</button>
+      <button class="nav" data-view="philosophy">经营OS</button>
       <button class="nav" data-view="selection">三区实验室</button>
       <button class="nav" data-view="workforce">AI Workforce</button>
     </nav>
-    <div class="sidebar-note">V0.4 · Channel Commerce Intelligence<br/>Product Zone Method · AI-native</div>
+    <div class="sidebar-note">V0.5B · Inventory + Fulfillment<br/>独占 / 优质 / 同质 · 前端铁三角</div>
   </aside>
 
   <main>
     <header>
       <div><p class="eyebrow">JOYOPC / CEO OPERATING SYSTEM</p><h1 id="page-title">CEO Cockpit</h1></div>
-      <div class="status-pill"><span></span> System online · V0.4</div>
+      <div class="status-pill"><span></span> System online · V0.5B</div>
     </header>
 
     <section id="cockpit" class="view active-view">
       <div id="kpis" class="kpi-grid"></div>
       <div class="grid-2">
         <article class="panel">
-          <div class="panel-head"><div><p class="eyebrow">PRODUCT STRATEGY</p><h2>正式商品三区</h2></div><span class="muted">独占 > 优势 > 同质</span></div>
+          <div class="panel-head"><div><p class="eyebrow">PRODUCT STRATEGY</p><h2>正式商品三区</h2></div><span class="muted">独占 > 优质 > 同质</span></div>
           <div id="zone-bars"></div>
-          <p class="method-note">JoyOPC 不按“热不热门”单维度选品，而是先判断竞争区，再决定投入强度。</p>
+          <p id="mix-contradiction" class="method-note">通过分析客户基本面确定产品分布，再用策略调整三区配比以优化利润率。</p>
         </article>
         <article class="panel">
           <div class="panel-head"><div><p class="eyebrow">OPPORTUNITY PIPELINE</p><h2>候选商品漏斗</h2></div></div>
@@ -73,6 +74,14 @@
               <label>市场<select name="market"><option>US</option><option>UK</option><option>SG</option></select></label>
             </div>
             <label class="check"><input name="exclusive_rights" type="checkbox" /> 有独家/排他销售权</label>
+            <label class="check"><input name="has_persona" type="checkbox" /> 有陪伴人格</label>
+            <label class="check"><input name="memory_enabled" type="checkbox" /> 记忆开启（默认关）</label>
+            <div class="form-grid">
+              <label>硬件代际<select name="hw_gen"><option value="1">Gen1 脑</option><option value="2">Gen2 五官</option><option value="3">Gen3 四肢</option></select></label>
+              <label>外形壳<input name="shell" placeholder="毛绒 / 潮玩" /></label>
+            </div>
+            <label class="check"><input name="claim_camera" type="checkbox" /> 声称摄像头</label>
+            <label class="check"><input name="claim_limb" type="checkbox" /> 声称肢体/舵机</label>
             <details>
               <summary>高级三区参数</summary>
               <div id="candidate-sliders" class="slider-grid compact-sliders"></div>
@@ -155,6 +164,11 @@
           <div><h3>导入批次</h3><div id="batch-list"></div></div>
           <div><h3>多模态分析 / 市场连接器</h3><div id="analysis-list"></div></div>
         </div>
+      </article>
+      <article class="panel">
+        <div class="panel-head"><div><p class="eyebrow">OPEN SOURCE COMPOSE</p><h2>引进的开源能力</h2></div><span class="status-chip">不 fork</span></div>
+        <p class="method-note">JoyOPC 只 compose 官方发行版与端口参考：Listing 上限、SKU 绑定、履约选点、SEA 渠道观察。不把 Saleor / Shopify / KubeRiva / TradeMind 改成内核。</p>
+        <div id="oss-stack-list" class="batch-list"></div>
       </article>
     </section>
 
@@ -239,8 +253,69 @@
 
     <section id="products" class="view">
       <article class="panel">
+        <div class="panel-head"><div><p class="eyebrow">LISTING STUDIO</p><h2>上架包 · 文案 / P图 / 短视频分镜</h2></div><span class="status-chip">compose OSS</span></div>
+        <p class="method-note top-note">引进 Listing Studio 文案上限、product_card_processor 渠道画布、Media Studio Hook-Demo-Proof-CTA 分镜。无实拍时生成标明 synthetic 的主图，不伪造商品照片。有 ffmpeg 才拼 MP4。</p>
+        <form id="listing-pack-form" class="compact-form">
+          <label>Master Product<select id="listing-pack-product" name="product_id"></select></label>
+          <button class="primary" type="submit">生成上架包</button>
+        </form>
+        <div id="listing-pack-result" class="inline-result muted">等待生成</div>
+      </article>
+      <article class="panel">
         <div class="panel-head"><div><p class="eyebrow">MASTER PRODUCT</p><h2>统一商品主数据</h2></div><span class="muted">CEO批准候选商品后自动进入这里</span></div>
-        <div class="table-wrap"><table><thead><tr><th>SKU</th><th>商品</th><th>三区</th><th>机会分</th><th>毛利</th><th>建议</th><th>Shopify</th></tr></thead><tbody id="product-table"></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>SKU</th><th>商品</th><th>护照</th><th>三区</th><th>机会分</th><th>毛利</th><th>建议</th><th>Shopify</th></tr></thead><tbody id="product-table"></tbody></table></div>
+      </article>
+    </section>
+
+    <section id="philosophy" class="view">
+      <div class="philosophy-hero">
+        <p class="eyebrow" id="os-phase">前端铁三角</p>
+        <h2 id="os-contradiction">正在读取经营OS…</h2>
+        <p id="os-fundamentals" class="method-note top-note"></p>
+      </div>
+      <article class="panel">
+        <div class="panel-head"><div><p class="eyebrow">CROSS-BORDER AI TOY</p><h2>跨境 AI 玩具作战分解</h2></div><span class="muted">TikTok TEST → Shopify → Amazon SCALE</span></div>
+        <p id="cb-fundamentals" class="method-note top-note"></p>
+        <ol id="cb-sequence" class="result-list"></ol>
+        <div id="cb-channels" class="talent-grid"></div>
+      </article>
+      <div class="grid-2">
+        <article class="panel">
+          <div class="panel-head"><div><p class="eyebrow">OPTIMIZE MIX</p><h2>优化三区图</h2></div><span class="muted">目标 20 / 30 / 50</span></div>
+          <div class="mix-compare" id="mix-compare"></div>
+          <div id="mix-gaps" class="gap-list"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><div><p class="eyebrow">STRATEGY CIRCLES</p><h2>谋略六圈</h2></div><span class="muted">危机 · 保供 · 利润步行 · 认知 · 质量 · 生态</span></div>
+          <div id="strategy-circles"></div>
+        </article>
+      </div>
+      <div class="grid-2">
+        <article class="panel">
+          <div class="panel-head"><div><p class="eyebrow">IRON TRIANGLE</p><h2>谋略落地与博弈</h2></div></div>
+          <ol id="os-actions" class="result-list"></ol>
+          <p id="os-gaming" class="method-note"></p>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><div><p class="eyebrow">ADVANTAGE AUDIT</p><h2>优势真伪</h2></div></div>
+          <div id="advantage-audit"></div>
+          <p class="method-note">伪优势与自嗨型优势不得按独占投入。创造优势来自控制权、认知、模式、成本、保供或超级体验。</p>
+        </article>
+      </div>
+      <div class="grid-2">
+        <article class="panel">
+          <div class="panel-head"><div><p class="eyebrow">MANAGEMENT CADENCE</p><h2>经营过程 ①–⑩</h2></div><span class="muted" id="os-cadence">周节奏</span></div>
+          <ol id="process-loop" class="process-loop"></ol>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><div><p class="eyebrow">GOALS & VALUE</p><h2>目标考核 · 人才 VALUE</h2></div></div>
+          <div id="os-goals"></div>
+          <div id="os-talent" class="talent-grid"></div>
+        </article>
+      </div>
+      <article class="panel">
+        <div class="panel-head"><div><p class="eyebrow">CEO AGENDA</p><h2>本周必须拍板</h2></div></div>
+        <ol id="os-agenda" class="result-list"></ol>
       </article>
     </section>
 
@@ -251,6 +326,10 @@
           <form id="selection-form" class="selection-form">
             <label>产品名称<input name="product_name" value="New AI Companion Toy" /></label>
             <label class="check"><input name="exclusive_rights" type="checkbox" /> 有独家/排他销售权</label>
+            <label class="check"><input name="has_persona" type="checkbox" /> 有陪伴人格</label>
+            <label class="check"><input name="memory_enabled" type="checkbox" /> 记忆开启（默认关）</label>
+            <label>硬件代际<select name="hw_gen"><option value="1">Gen1 脑</option><option value="2">Gen2 五官</option><option value="3">Gen3 四肢</option></select></label>
+            <label class="check"><input name="claim_camera" type="checkbox" /> 声称摄像头</label>
             <div class="slider-grid" id="sliders"></div>
             <label>预期毛利 %<input name="expected_margin_pct" type="number" min="-100" max="100" value="35" /></label>
             <label>现金周转天数<input name="cash_cycle_days" type="number" min="0" max="365" value="30" /></label>
@@ -266,7 +345,8 @@
 
     <section id="workforce" class="view">
       <article class="panel">
-        <div class="panel-head"><div><p class="eyebrow">AI WORKFORCE</p><h2>AI员工任务中心</h2></div></div>
+        <div class="panel-head"><div><p class="eyebrow">AI WORKFORCE · TALENT VALUE</p><h2>按价值/优势/落地/靠谱/进化分工</h2></div></div>
+        <p class="method-note top-note">任务不再是工单列表，而是经营过程中的抓牌、出牌、换局。标签 V A L U E 对应考核维度。</p>
         <div id="workforce-list"></div>
       </article>
     </section>

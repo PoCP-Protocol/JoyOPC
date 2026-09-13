@@ -12,6 +12,9 @@ from .adapters.channels.mock import MockChannelAdapter
 from .adapters.channels.shopify import ShopifyAdapter
 from .adapters.channels.tiktok_shop import TikTokShopAdapter
 from .content_factory import content_factory
+from .fulfillment_sourcing import score_supplier_nodes
+from .sku_matcher import match_master_sku
+from .product_unit import live_publish_block_reason
 from .models import (
     ChannelAccount,
     ChannelCostEntry,
@@ -22,6 +25,8 @@ from .models import (
     CommerceOrder,
     CommerceOrderItem,
     MasterProduct,
+    Supplier,
+    SupplierProduct,
 )
 
 
@@ -117,6 +122,13 @@ async def publish_master_product(
     run = ChannelSyncRun(channel_account_id=account.id, operation="PUBLISH_PRODUCT")
     db.add(run)
     db.flush()
+    blocked = live_publish_block_reason(product, publish_as_draft=publish_as_draft)
+    if blocked:
+        run.status = "FAILED"
+        run.error_message = blocked
+        run.completed_at = datetime.utcnow()
+        db.commit()
+        return {"status": "REQUIRES_CERT", "reason": blocked, "master_sku": product.sku}
     listing = db.scalar(
         select(ChannelListing).where(
             ChannelListing.master_product_id == product.id,
@@ -272,9 +284,15 @@ def _upsert_order(db: Session, account: ChannelAccount, raw: dict[str, Any]) -> 
     link.raw_json = json.dumps(raw.get("raw") or {}, ensure_ascii=False, default=str)
     link.imported_at = datetime.utcnow()
 
+    catalog = [(p.sku, p.name) for p in db.scalars(select(MasterProduct)).all()]
     for item in raw.get("items") or []:
         sku = str(item.get("sku") or "")
         product = db.scalar(select(MasterProduct).where(MasterProduct.sku == sku)) if sku else None
+        if product is None:
+            bound = match_master_sku(sku or str(item.get("title") or ""), catalog)
+            if bound.get("sku"):
+                sku = bound["sku"]
+                product = db.scalar(select(MasterProduct).where(MasterProduct.sku == sku))
         qty = int(item.get("quantity") or 1)
         product_cost = round((product.landed_cost if product else 0) * qty, 2)
         row = CommerceOrderItem(
@@ -316,9 +334,11 @@ def reconcile_profit(db: Session) -> dict[str, Any]:
             and (
                 (e.order_no and e.order_no == order.order_no)
                 or (link and e.external_order_id and e.external_order_id == link.external_order_id)
-                or (e.sku and any(i.sku == e.sku for i in items))
             )
         ]
+        # SKU-only costs are period-level/unallocated. Applying one SKU cost to every
+        # order containing that SKU multiplies the expense. V0.5+ routes these through
+        # FinancialTransaction + FinancialAllocation instead.
         for entry in matching:
             targets = [i for i in items if entry.sku and i.sku == entry.sku] or items
             weights = [max(i.net_sales, 0.01) for i in targets]
@@ -386,6 +406,35 @@ def sku_profit(db: Session) -> list[dict[str, Any]]:
         g["profit_quality"] = "RECONCILED" if cost_presence >= 2 else "PROVISIONAL"
         result.append(g)
     return sorted(result, key=lambda x: x["contribution_profit"], reverse=True)
+
+
+def source_fulfillment(db: Session, product: MasterProduct, strategy: str = "BALANCED") -> dict[str, Any]:
+    nodes = []
+    for sp in db.scalars(select(SupplierProduct).where(SupplierProduct.master_product_id == product.id)).all():
+        supplier = db.get(Supplier, sp.supplier_id)
+        nodes.append(
+            {
+                "supplier_id": sp.supplier_id,
+                "supplier_name": supplier.name if supplier else "",
+                "supplier_sku": sp.supplier_sku,
+                "supplier_price": sp.supplier_price,
+                "lead_time_days": sp.lead_time_days,
+                "exclusive_rights": sp.exclusive_rights,
+                "moq": sp.moq,
+            }
+        )
+    ranked = score_supplier_nodes(
+        strategy=strategy,
+        nodes=nodes,
+        uniqueness=float(product.opportunity_score or 0),
+        content_advantage=float(product.expected_margin_pct or 0),
+    )
+    return {
+        "master_sku": product.sku,
+        "strategy": (strategy or "BALANCED").upper(),
+        "nodes": ranked,
+        "inspired_by": "https://github.com/KubeRiva/OMS",
+    }
 
 
 def _parse_dt(value: Any) -> datetime | None:

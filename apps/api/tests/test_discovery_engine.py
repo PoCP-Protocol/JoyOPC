@@ -1,5 +1,6 @@
 from app.discovery_engine import CandidateIntelligenceEngine
 from app.models import MarketSignal, ProductCandidate
+from app.product_unit import apply_unit_to_orm, companion_passport
 from app.schemas import SelectionPolicy
 
 
@@ -60,6 +61,7 @@ def test_exclusive_candidate_can_be_scale_candidate():
         return_risk=25,
         cash_cycle_days=20,
     )
+    apply_unit_to_orm(candidate, companion_passport(soul_recipe_id="js-exclusive-pet-v1", shell="plush"))
     result = CandidateIntelligenceEngine(SelectionPolicy()).evaluate(candidate, [])
     assert result["selection"].zone == "EXCLUSIVE"
     assert result["selection"].decision == "SCALE"

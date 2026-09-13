@@ -8,7 +8,13 @@ vendor/saleor-platform/
 vendor/saleor-mcp/
 vendor/open-listing-studio/
 vendor/openlinker/
+vendor/kuberiva-oms/
+vendor/marketeer/
+vendor/trademind-ai/
+vendor/ai-ecommerce-media-studio/
+vendor/product-card-processor/
 .pytest_cache/
 .mypy_cache/
 apps/api/storage/uploads/
+apps/api/storage/media/
 *.log

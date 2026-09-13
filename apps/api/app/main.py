@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import csv
-import os
 import hashlib
 import io
 import json
 import mimetypes
+import os
 import shutil
+import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -16,17 +17,25 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from .adapters.saleor import SaleorAdapter
-from .config import MAX_UPLOAD_MB, UPLOAD_DIR, WEB_DIR, upsert_dotenv
+from .config import MAX_UPLOAD_MB, MEDIA_DIR, SCHEMA_MODE, UPLOAD_DIR, WEB_DIR, upsert_dotenv
+from .content_factory import content_factory
+from .listing_pack import build_listing_pack
 from .content_factory import content_factory
 from .database import Base, engine, get_db
+from .foundation_bootstrap import ensure_v05a_bootstrap_schema
+from . import foundation_models  # noqa: F401
+from . import operations_models  # noqa: F401
+from .fulfillment_runtime import allocate_unallocated_orders
 from .discovery_engine import CandidateIntelligenceEngine
 from .ingestion import MarketSignalFileImporter, SupplierCatalogImporter, json_dumps
 from .adapters.market.crawler import CrawlError, PublicPageCrawler
 from .market_data import GoogleTrendsAdapter
 from .multimodal import AssetContext, MultimodalGateway
+from .product_unit import candidate_orm_kwargs, copy_unit, dump_json_list, unit_api_dict
 from .models import (
     AgentTask,
     ChannelAccount,
@@ -59,9 +68,19 @@ from .schemas import (
     MarketSignalBatch,
     MarketSignalCreate,
     PublicPageCrawl,
+    MixPolicy,
     SelectionInput,
     SelectionPolicy,
     SelectionResult,
+)
+from .operating_os import (
+    MixItem,
+    analyze_portfolio,
+    approve_management_gate,
+    diagnose_sku,
+    implementation_play,
+    publish_management_error,
+    talent_for_agent,
 )
 from .seed import seed_demo
 from .selection_engine import ProductZoneEngine
@@ -73,11 +92,19 @@ from .channel_runtime import (
     reconcile_profit,
     shopify_channel_account,
     sku_profit,
+    source_fulfillment,
     sync_orders,
 )
+from .opensource_stack import catalog as opensource_catalog
+from .adapters.saleor_mcp import saleor_mcp
+from .sku_matcher import match_master_sku
 from .adapters.channels.shopify import ShopifyAdapter, looks_like_admin_token, normalize_shop_domain
+from .routers.foundation import router as foundation_router
+from .routers.operations import router as operations_router
 
-app = FastAPI(title="JoyOPC API", version="0.4.0")
+app = FastAPI(title="JoyOPC API", version="0.5.0b1")
+app.include_router(foundation_router)
+app.include_router(operations_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -87,14 +114,125 @@ app.add_middleware(
 )
 
 _policy = SelectionPolicy()
+_mix_policy = MixPolicy()
+
+
+def _portfolio_mix_items(db: Session) -> list[MixItem]:
+    products = db.scalars(select(MasterProduct).where(MasterProduct.active.is_(True))).all()
+    suppliers = db.scalars(select(SupplierProduct)).all()
+    exclusive_by_master = {row.master_product_id: row.exclusive_rights for row in suppliers}
+    profit_rows = {row["sku"]: row for row in sku_profit(db)}
+    items: list[MixItem] = []
+    for p in products:
+        profit = profit_rows.get(p.sku, {})
+        exclusive = exclusive_by_master.get(p.id, p.zone == "EXCLUSIVE")
+        zone_defaults = {
+            "EXCLUSIVE": dict(uniqueness=82, channel_control=78, cost_advantage=70, supply_advantage=75, content_advantage=80, brand_advantage=60, market_demand=80, competition_intensity=50, return_risk=28, compliance_risk=30),
+            "ADVANTAGE": dict(uniqueness=62, channel_control=55, cost_advantage=80, supply_advantage=82, content_advantage=75, brand_advantage=48, market_demand=74, competition_intensity=62, return_risk=28, compliance_risk=30),
+            "HOMOGENEOUS": dict(uniqueness=28, channel_control=28, cost_advantage=50, supply_advantage=55, content_advantage=40, brand_advantage=30, market_demand=64, competition_intensity=85, return_risk=48, compliance_risk=34),
+        }[p.zone]
+        items.append(
+            MixItem(
+                name=p.name,
+                zone=p.zone,
+                expected_margin_pct=p.expected_margin_pct,
+                gmv=float(profit.get("net_sales") or 0),
+                contribution_profit=float(profit.get("contribution_profit") or 0),
+                decision=p.decision,
+                status="ACTIVE",
+                exclusive_rights=bool(exclusive),
+                opportunity_score=p.opportunity_score,
+                market=p.target_market,
+                channel=(p.listings[0].channel if p.listings else "TikTok Shop"),
+                **zone_defaults,
+            )
+        )
+    candidates = db.scalars(select(ProductCandidate)).all()
+    for c in candidates:
+        if c.status in {"REJECTED", "PROMOTED"}:
+            continue
+        items.append(
+            MixItem(
+                name=c.product_name,
+                zone=c.zone,
+                expected_margin_pct=c.expected_margin_pct,
+                decision=c.decision,
+                status=c.status,
+                uniqueness=c.uniqueness,
+                channel_control=c.channel_control,
+                cost_advantage=c.cost_advantage,
+                supply_advantage=c.supply_advantage,
+                content_advantage=c.content_advantage,
+                brand_advantage=c.brand_advantage,
+                market_demand=c.market_demand,
+                competition_intensity=c.competition_intensity,
+                compliance_risk=c.compliance_risk,
+                return_risk=c.return_risk,
+                cash_cycle_days=c.cash_cycle_days,
+                exclusive_rights=c.exclusive_rights,
+                risk_score=c.risk_score,
+                opportunity_score=c.opportunity_score,
+                market=c.market,
+                channel=c.recommended_channel,
+            )
+        )
+    return items
+
+
+def _homogeneous_share(db: Session) -> tuple[float, float]:
+    os_state = analyze_portfolio(_portfolio_mix_items(db), _mix_policy)
+    return os_state["mix"]["sku_share"]["HOMOGENEOUS"], _mix_policy.homogeneous_alert_pct
+
+
+def _assert_publish_management(db: Session, product: MasterProduct) -> None:
+    share, alert = _homogeneous_share(db)
+    error = publish_management_error(
+        zone=product.zone,
+        decision=product.decision,
+        homogeneous_share=share,
+        homogeneous_alert=alert,
+    )
+    if error:
+        raise HTTPException(409, error)
 
 
 @app.on_event("startup")
 def startup() -> None:
-    Base.metadata.create_all(bind=engine)
+    last: Exception | None = None
+    for _ in range(20):
+        try:
+            if SCHEMA_MODE == "bootstrap":
+                Base.metadata.create_all(bind=engine)
+            else:
+                with engine.connect() as conn:
+                    conn.exec_driver_sql("SELECT 1")
+            last = None
+            break
+        except OperationalError as exc:
+            last = exc
+            time.sleep(0.5)
+    if last is not None:
+        raise RuntimeError(
+            f"JoyOPC cannot connect to the database ({engine.url.render_as_string(hide_password=True)}). "
+            "Start Postgres with `docker compose up -d postgres`."
+        ) from last
     with next(get_db()) as db:
         seed_demo(db)
+        if SCHEMA_MODE == "bootstrap":
+            ensure_v05a_bootstrap_schema(engine)
         reconcile_profit(db)
+
+
+@app.get("/api/health")
+def health() -> dict:
+    return {
+        "status": "ok",
+        "product": "JoyOPC",
+        "version": "0.5.0b1",
+        "schema_mode": SCHEMA_MODE,
+        "database": engine.dialect.name,
+        "database_url": engine.url.render_as_string(hide_password=True),
+    }
 
 
 def _candidate_dict(c: ProductCandidate) -> dict:
@@ -119,6 +257,28 @@ def _candidate_dict(c: ProductCandidate) -> dict:
         "rationale": c.rationale,
         "next_actions": c.next_actions,
         "promoted_master_product_id": c.promoted_master_product_id,
+        "philosophy": diagnose_sku(
+            SelectionInput(
+                product_name=c.product_name,
+                exclusive_rights=c.exclusive_rights,
+                uniqueness=c.uniqueness,
+                channel_control=c.channel_control,
+                cost_advantage=c.cost_advantage,
+                supply_advantage=c.supply_advantage,
+                content_advantage=c.content_advantage,
+                brand_advantage=c.brand_advantage,
+                market_demand=c.market_demand,
+                competition_intensity=c.competition_intensity,
+                expected_margin_pct=c.expected_margin_pct,
+                compliance_risk=c.compliance_risk,
+                return_risk=c.return_risk,
+                cash_cycle_days=c.cash_cycle_days,
+            ),
+            zone=c.zone,
+            decision=c.decision,
+            risk_score=c.risk_score,
+        ).model_dump(),
+        "product_unit": unit_api_dict(c, market=c.market),
     }
 
 
@@ -146,12 +306,9 @@ def _evaluate_candidate(db: Session, candidate: ProductCandidate) -> ProductCand
     candidate.rationale = "；".join(selection.reasons)
     candidate.next_actions = "；".join(selection.recommended_actions)
     candidate.evaluated_at = datetime.utcnow()
+    candidate.cert_gap_json = dump_json_list(selection.cert_gap)
+    candidate.needs_hardware_gate = selection.needs_hardware_gate
     return candidate
-
-
-@app.get("/api/health")
-def health() -> dict:
-    return {"status": "ok", "product": "JoyOPC", "version": "0.4.0"}
 
 
 @app.get("/api/dashboard")
@@ -192,6 +349,7 @@ def dashboard(db: Session = Depends(get_db)) -> dict:
         "channel_sales": channel_sales,
         "zone_counts": zone_counts,
         "candidate_pipeline": pipeline,
+        "operating_os": analyze_portfolio(_portfolio_mix_items(db), _mix_policy),
         "ceo_decisions": [
             {
                 "id": t.id,
@@ -199,6 +357,7 @@ def dashboard(db: Session = Depends(get_db)) -> dict:
                 "title": t.title,
                 "priority": t.priority,
                 "recommendation": t.recommendation,
+                **talent_for_agent(t.agent),
             }
             for t in tasks
             if t.requires_ceo_approval and t.status == "OPEN"
@@ -212,6 +371,7 @@ def dashboard(db: Session = Depends(get_db)) -> dict:
                 "status": t.status,
                 "requires_ceo_approval": t.requires_ceo_approval,
                 "recommendation": t.recommendation,
+                **talent_for_agent(t.agent),
             }
             for t in tasks
         ],
@@ -234,6 +394,7 @@ def products(db: Session = Depends(get_db)) -> list[dict]:
             "opportunity_score": p.opportunity_score,
             "decision": p.decision,
             "selection_reason": p.selection_reason,
+            "product_unit": unit_api_dict(p, market=p.target_market),
         }
         for p in rows
     ]
@@ -313,7 +474,7 @@ def candidates(db: Session = Depends(get_db)) -> list[dict]:
 @app.post("/api/candidates")
 def create_candidate(payload: CandidateCreate, db: Session = Depends(get_db)) -> dict:
     code = f"CAND-{uuid4().hex[:8].upper()}"
-    row = ProductCandidate(candidate_code=code, **payload.model_dump())
+    row = ProductCandidate(candidate_code=code, **candidate_orm_kwargs(payload.model_dump()))
     db.add(row)
     db.flush()
     _evaluate_candidate(db, row)
@@ -343,8 +504,68 @@ def decide_candidate(candidate_id: int, payload: CandidateDecision, db: Session 
         _evaluate_candidate(db, candidate)
     elif payload.action == "REJECT":
         candidate.status = "REJECTED"
-        db.add(AgentTask(agent="Buyer AI", title=f"{candidate.product_name} 已被 CEO 淘汰", priority="MEDIUM", status="DONE", recommendation=payload.note or "停止后续投放与上架准备"))
+        play = implementation_play(candidate.zone, diagnose_sku(
+            SelectionInput(
+                product_name=candidate.product_name,
+                exclusive_rights=candidate.exclusive_rights,
+                uniqueness=candidate.uniqueness,
+                channel_control=candidate.channel_control,
+                cost_advantage=candidate.cost_advantage,
+                supply_advantage=candidate.supply_advantage,
+                content_advantage=candidate.content_advantage,
+                brand_advantage=candidate.brand_advantage,
+                market_demand=candidate.market_demand,
+                competition_intensity=candidate.competition_intensity,
+                expected_margin_pct=candidate.expected_margin_pct,
+                compliance_risk=candidate.compliance_risk,
+                return_risk=candidate.return_risk,
+                cash_cycle_days=candidate.cash_cycle_days,
+            ),
+            zone=candidate.zone,
+            decision="REJECT",
+            risk_score=candidate.risk_score,
+        ))
+        db.add(AgentTask(
+            agent=play["owner"],
+            title=f"换局 · {candidate.product_name} 已淘汰",
+            priority="MEDIUM",
+            status="DONE",
+            recommendation=payload.note or play["recommendation"],
+        ))
     else:
+        share, alert = _homogeneous_share(db)
+        ph = diagnose_sku(
+            SelectionInput(
+                product_name=candidate.product_name,
+                exclusive_rights=candidate.exclusive_rights,
+                uniqueness=candidate.uniqueness,
+                channel_control=candidate.channel_control,
+                cost_advantage=candidate.cost_advantage,
+                supply_advantage=candidate.supply_advantage,
+                content_advantage=candidate.content_advantage,
+                brand_advantage=candidate.brand_advantage,
+                market_demand=candidate.market_demand,
+                competition_intensity=candidate.competition_intensity,
+                expected_margin_pct=candidate.expected_margin_pct,
+                compliance_risk=candidate.compliance_risk,
+                return_risk=candidate.return_risk,
+                cash_cycle_days=candidate.cash_cycle_days,
+            ),
+            zone=candidate.zone,
+            decision=candidate.decision,
+            risk_score=candidate.risk_score,
+        )
+        gate = approve_management_gate(
+            zone=candidate.zone,
+            decision=candidate.decision,
+            quality=ph.advantage_quality,
+            homogeneous_share=share,
+            homogeneous_alert=alert,
+        )
+        if gate["blocked"]:
+            raise HTTPException(409, " ".join(gate["reasons"]))
+        candidate.decision = gate["force_decision"]
+        play = implementation_play(candidate.zone, ph)
         if candidate.promoted_master_product_id:
             candidate.status = "PROMOTED"
         else:
@@ -360,6 +581,7 @@ def decide_candidate(candidate_id: int, payload: CandidateDecision, db: Session 
                 decision=candidate.decision,
                 selection_reason=candidate.rationale,
             )
+            copy_unit(candidate, master)
             db.add(master)
             db.flush()
 
@@ -392,10 +614,39 @@ def decide_candidate(candidate_id: int, payload: CandidateDecision, db: Session 
             )
             candidate.promoted_master_product_id = master.id
             candidate.status = "PROMOTED"
-            db.add(AgentTask(agent="Merchandiser AI", title=f"{candidate.product_name} 已进入正式商品池", priority="HIGH", recommendation="已生成供应商映射和渠道 DRAFT Listing；下一步生成内容资产与首轮测试计划"))
+            extra = "；".join(gate["reasons"])
+            db.add(AgentTask(
+                agent=play["owner"],
+                title=f"{play['title']} · {candidate.product_name}",
+                priority="HIGH",
+                recommendation=f"{play['recommendation']} 已进入 Master Product / DRAFT Listing。{extra}".strip(),
+            ))
     db.commit()
     db.refresh(candidate)
     return _candidate_dict(candidate)
+
+
+@app.get("/api/operating-os")
+def operating_os(db: Session = Depends(get_db)) -> dict:
+    return analyze_portfolio(_portfolio_mix_items(db), _mix_policy)
+
+
+@app.get("/api/crossborder-playbook")
+def crossborder_playbook(db: Session = Depends(get_db)) -> dict:
+    os_state = analyze_portfolio(_portfolio_mix_items(db), _mix_policy)
+    return os_state.get("crossborder") or {}
+
+
+@app.get("/api/selection/mix-policy", response_model=MixPolicy)
+def get_mix_policy() -> MixPolicy:
+    return _mix_policy
+
+
+@app.put("/api/selection/mix-policy", response_model=MixPolicy)
+def update_mix_policy(policy: MixPolicy) -> MixPolicy:
+    global _mix_policy
+    _mix_policy = policy
+    return _mix_policy
 
 
 @app.get("/api/selection/policy", response_model=SelectionPolicy)
@@ -427,6 +678,7 @@ def agent_tasks(db: Session = Depends(get_db)) -> list[dict]:
             "status": t.status,
             "requires_ceo_approval": t.requires_ceo_approval,
             "recommendation": t.recommendation,
+            **talent_for_agent(t.agent),
         }
         for t in tasks
     ]
@@ -544,7 +796,7 @@ def import_supplier_catalog(file: UploadFile = File(...), db: Session = Depends(
                 if existing:
                     candidate = existing
                 else:
-                    candidate = ProductCandidate(candidate_code=f"CAND-{uuid4().hex[:8].upper()}", **normalized)
+                    candidate = ProductCandidate(candidate_code=f"CAND-{uuid4().hex[:8].upper()}", **candidate_orm_kwargs(normalized))
                     db.add(candidate)
                     db.flush()
                 _evaluate_candidate(db, candidate)
@@ -771,13 +1023,30 @@ def reset_demo(db: Session = Depends(get_db)) -> dict:
 @app.get("/api/foundation")
 async def foundation(db: Session = Depends(get_db)) -> dict:
     saleor = await SaleorAdapter().health()
+    mcp = await saleor_mcp.health()
     accounts = db.scalars(select(ChannelAccount).order_by(ChannelAccount.id)).all()
     return {
         "kernel": saleor,
+        "saleor_mcp": mcp,
         "channels": [account_dict(x) for x in accounts],
         "content_factory": {"inspired_by": content_factory.source, "status": "ready"},
+        "opensource": opensource_catalog(),
         "rule": "JoyOPC composes official OSS. It does not fork Saleor or turn Shopify into the platform kernel.",
     }
+
+
+@app.get("/api/products/{product_id}/fulfillment-source")
+def product_fulfillment_source(product_id: int, strategy: str = "BALANCED", db: Session = Depends(get_db)) -> dict:
+    product = db.get(MasterProduct, product_id)
+    if not product:
+        raise HTTPException(404, "Master product not found")
+    return source_fulfillment(db, product, strategy)
+
+
+@app.post("/api/sku/match")
+def sku_match(payload: dict, db: Session = Depends(get_db)) -> dict:
+    catalog = [(p.sku, p.name) for p in db.scalars(select(MasterProduct)).all()]
+    return match_master_sku(str(payload.get("query") or ""), catalog)
 
 
 @app.post("/api/integrations/saleor/webhooks")
@@ -789,6 +1058,38 @@ async def saleor_webhook(request: Request, saleor_event: str | None = Header(def
 @app.post("/api/content/listings")
 def generate_listings(payload: dict) -> dict:
     return content_factory.generate(payload, str(payload.get("channel") or "all"))
+
+
+@app.post("/api/content/listings/master/{product_id}")
+def generate_master_listings(product_id: int, channel: str = "all", db: Session = Depends(get_db)) -> dict:
+    product = db.get(MasterProduct, product_id)
+    if product is None:
+        raise HTTPException(404, "master product not found")
+    return content_factory.generate(
+        {"sku": product.sku, "name": product.name, "features": [product.selection_reason] if product.selection_reason else []},
+        channel,
+    )
+
+
+@app.post("/api/content/pack/{product_id}")
+def generate_listing_pack(product_id: int, db: Session = Depends(get_db)) -> dict:
+    product = db.get(MasterProduct, product_id)
+    if product is None:
+        raise HTTPException(404, "master product not found")
+    return build_listing_pack(db, product)
+
+
+@app.get("/api/content/media/{sku}/{filename}")
+def content_media(sku: str, filename: str) -> FileResponse:
+    if "/" in sku or "\\" in sku or "/" in filename or "\\" in filename or ".." in sku or ".." in filename:
+        raise HTTPException(400, "invalid media path")
+    path = (MEDIA_DIR / sku / filename).resolve()
+    media_root = MEDIA_DIR.resolve()
+    if media_root not in path.parents and path != media_root:
+        raise HTTPException(400, "invalid media path")
+    if not path.is_file():
+        raise HTTPException(404, "media not found")
+    return FileResponse(path)
 
 
 @app.get("/api/channels")
@@ -857,6 +1158,7 @@ async def publish_shopify_master(product_id: int, db: Session = Depends(get_db))
         raise HTTPException(404, "Master product not found")
     if product.decision in {"HOLD", "REJECT"}:
         raise HTTPException(409, f"三区决策为 {product.decision}，不允许直接发布")
+    _assert_publish_management(db, product)
     return await publish_master_product(db, account=account, product=product, publish_as_draft=True, channel_payload={})
 
 
@@ -915,8 +1217,7 @@ async def publish_channel_product(payload: ChannelPublishRequest, db: Session = 
         raise HTTPException(404, "Channel account not found")
     if not product:
         raise HTTPException(404, "Master product not found")
-    if product.decision in {"HOLD", "REJECT"}:
-        raise HTTPException(409, f"三区决策为 {product.decision}，不允许直接发布")
+    _assert_publish_management(db, product)
     return await publish_master_product(
         db,
         account=account,
@@ -932,7 +1233,10 @@ async def sync_channel_orders(account_id: int, payload: ChannelOrderSyncRequest,
     if not account:
         raise HTTPException(404, "Channel account not found")
     since = datetime.utcnow() - timedelta(hours=payload.since_hours)
-    return await sync_orders(db, account=account, since_iso=since.isoformat(timespec="seconds") + "Z")
+    result = await sync_orders(db, account=account, since_iso=since.isoformat(timespec="seconds") + "Z")
+    if result.get("status") == "DONE":
+        result["fulfillment"] = allocate_unallocated_orders(db, channel_account_id=account.id)
+    return result
 
 
 @app.get("/api/channel-sync-runs")

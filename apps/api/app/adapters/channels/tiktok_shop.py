@@ -70,6 +70,14 @@ class TikTokShopAdapter(ChannelAdapter):
             }
         payload = dict(payload)
         payload.setdefault("idempotency_key", product.get("idempotency_key"))
+        if not self.connected:
+            return {
+                "status": "DRY_RUN",
+                "reason": "TikTok Shop credentials not configured; product payload accepted locally",
+                "inspired_by": "https://github.com/codustry/marketeer",
+                "external_sku": product.get("sku") or "",
+                "data": payload,
+            }
         data = await self._request("POST", self.create_product_path, body=payload)
         body = data.get("data") or {}
         product_id = str(body.get("product_id") or body.get("id") or "")

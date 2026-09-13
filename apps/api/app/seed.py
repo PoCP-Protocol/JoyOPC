@@ -26,8 +26,29 @@ from .models import (
     Supplier,
     SupplierProduct,
 )
+from .product_unit import apply_unit_to_orm, companion_passport, dump_json_list, unit_from_mapping
 from .schemas import SelectionInput, SelectionPolicy
 from .selection_engine import ProductZoneEngine
+
+
+def default_channel_accounts() -> list[ChannelAccount]:
+    return [
+        ChannelAccount(channel="Mock", market="US", account_name="JoyOPC Safe Sandbox", status="CONNECTED", credential_env_prefix="MOCK"),
+        ChannelAccount(channel="Shopify", market="US", account_name="JoyOPC Shopify", status="NOT_CONNECTED", credential_env_prefix="SHOPIFY", store_domain="your-store.myshopify.com", config_json='{"api_version":"2026-07"}'),
+        ChannelAccount(channel="Amazon", market="US", account_name="JoyOPC Amazon US", status="NOT_CONNECTED", credential_env_prefix="AMAZON_SP", marketplace_id="ATVPDKIKX0DER", config_json='{"region":"NA"}'),
+        ChannelAccount(channel="TikTok Shop", market="US", account_name="JoyOPC TikTok Shop US", status="NOT_CONNECTED", credential_env_prefix="TIKTOK_SHOP"),
+    ]
+
+
+def ensure_channel_accounts(db: Session) -> None:
+    existing = {row.channel for row in db.scalars(select(ChannelAccount)).all()}
+    added = False
+    for row in default_channel_accounts():
+        if row.channel not in existing:
+            db.add(row)
+            added = True
+    if added:
+        db.commit()
 
 
 def seed_demo(db: Session, *, reset: bool = False) -> None:
@@ -64,15 +85,11 @@ def seed_demo(db: Session, *, reset: bool = False) -> None:
         db.commit()
 
     if db.scalar(select(OPCCompany.id).limit(1)) is not None:
+        ensure_channel_accounts(db)
         return
 
     db.add(OPCCompany(name="JoyOPC AI Toy Trading", base_currency="USD"))
-    db.add_all([
-        ChannelAccount(channel="Mock", market="US", account_name="JoyOPC Safe Sandbox", status="CONNECTED", credential_env_prefix="MOCK"),
-        ChannelAccount(channel="Shopify", market="US", account_name="JoyOPC Shopify", status="NOT_CONNECTED", credential_env_prefix="SHOPIFY", store_domain="your-store.myshopify.com", config_json='{"api_version":"2026-07"}'),
-        ChannelAccount(channel="Amazon", market="US", account_name="JoyOPC Amazon US", status="NOT_CONNECTED", credential_env_prefix="AMAZON_SP", marketplace_id="ATVPDKIKX0DER", config_json='{"region":"NA"}'),
-        ChannelAccount(channel="TikTok Shop", market="US", account_name="JoyOPC TikTok Shop US", status="NOT_CONNECTED", credential_env_prefix="TIKTOK_SHOP"),
-    ])
+    db.add_all(default_channel_accounts())
     supplier = Supplier(name="Shenzhen SmartToy Supply Co.", supports_dropship=True)
     db.add(supplier)
     db.flush()
@@ -99,6 +116,7 @@ def seed_demo(db: Session, *, reset: bool = False) -> None:
                 compliance_risk=38,
                 return_risk=28,
                 cash_cycle_days=22,
+                **companion_passport(soul_recipe_id="js-story-teddy-v1", shell="plush").to_selection_fields(),
             ),
         ),
         (
@@ -121,6 +139,12 @@ def seed_demo(db: Session, *, reset: bool = False) -> None:
                 compliance_risk=30,
                 return_risk=26,
                 cash_cycle_days=18,
+                **companion_passport(
+                    soul_recipe_id="js-pocket-translator-v1",
+                    shell="handheld",
+                    module_tier="Standard",
+                    skills=["多模态问答", "认字"],
+                ).to_selection_fields(),
             ),
         ),
         (
@@ -160,6 +184,7 @@ def seed_demo(db: Session, *, reset: bool = False) -> None:
             decision=result.decision,
             selection_reason="；".join(result.reasons),
         )
+        apply_unit_to_orm(p, unit_from_mapping(input_data.model_dump()))
         db.add(p)
         db.flush()
         db.add(
@@ -271,6 +296,9 @@ def seed_demo(db: Session, *, reset: bool = False) -> None:
     ]
     db.add_all(candidates)
     db.flush()
+    apply_unit_to_orm(candidates[0], companion_passport(soul_recipe_id="js-emotion-pet-v1", shell="plush pet"))
+    apply_unit_to_orm(candidates[1], companion_passport(soul_recipe_id="js-learning-pet-v1", shell="learning pet", module_tier="Standard", skills=["认字", "拼音"]))
+    apply_unit_to_orm(candidates[2], unit_from_mapping({"shell": "voice robot", "claimed_features": ["speaker", "mic"]}))
 
     intelligence = CandidateIntelligenceEngine(SelectionPolicy())
     all_signals = db.scalars(select(MarketSignal)).all()
@@ -287,6 +315,8 @@ def seed_demo(db: Session, *, reset: bool = False) -> None:
         candidate.status = "EVALUATED"
         candidate.rationale = "；".join(selection.reasons)
         candidate.next_actions = "；".join(selection.recommended_actions)
+        candidate.cert_gap_json = dump_json_list(selection.cert_gap)
+        candidate.needs_hardware_gate = selection.needs_hardware_gate
 
     demo_orders = [
         CommerceOrder(order_no="JOY-10001", channel="TikTok Shop", gross_sales=690, product_cost=250, shipping_cost=82, platform_fee=62, ad_cost=118, refund_cost=0),
@@ -312,11 +342,11 @@ def seed_demo(db: Session, *, reset: bool = False) -> None:
 
     db.add_all(
         [
-            AgentTask(agent="Market AI", title="发现 6 个 AI 陪伴玩具新机会", priority="HIGH", recommendation="优先分析独占授权可能性与 TikTok 内容传播性"),
-            AgentTask(agent="Buyer AI", title="AI Emotion Companion Pet 进入独占区候选", priority="HIGH", requires_ceo_approval=True, recommendation="建议批准进入 Master Product，并锁定美国线上渠道独家权"),
-            AgentTask(agent="Pricing AI", title="Generic Voice Robot 利润安全垫不足", priority="HIGH", requires_ceo_approval=True, recommendation="同质区不建议价格战；若不能把落地成本再降 12%，暂停上架"),
-            AgentTask(agent="Content AI", title="为优势区新品生成 12 套短视频测试素材", priority="MEDIUM", recommendation="按痛点/场景/对比/UGC 四类内容做 A/B 测试"),
-            AgentTask(agent="Commerce CFO", title="按贡献利润而非 GMV 排名 SKU", priority="MEDIUM", recommendation="将广告费、平台费、物流、退款统一归入 SKU 贡献利润"),
+            AgentTask(agent="Market AI", title="发现 6 个 AI 陪伴玩具新机会", priority="HIGH", recommendation="[E 进化] 用市场基本面校准机会，不能用热度绕过三区图。"),
+            AgentTask(agent="Buyer AI", title="AI Emotion Companion Pet 进入独占区候选", priority="HIGH", requires_ceo_approval=True, recommendation="[A 优势] 建议批准进入 Master Product，并锁定美国线上渠道独家权（创造优势：控制权）。"),
+            AgentTask(agent="Pricing AI", title="Generic Voice Robot 利润安全垫不足", priority="HIGH", requires_ceo_approval=True, recommendation="[V 价值 · 换局] 同质区不建议价格战；若不能把落地成本再降 12%，暂停上架。"),
+            AgentTask(agent="Content AI", title="为优质区新品生成 12 套短视频测试素材", priority="MEDIUM", recommendation="[A 优势 · 认知拉齐] 按痛点/场景/对比/UGC 做 A/B；叙事必须对齐真实差异，防止自嗨。"),
+            AgentTask(agent="Commerce CFO", title="按贡献利润而非 GMV 考核 SKU", priority="MEDIUM", recommendation="[V 价值 · ⑧目标与考核] 广告费、平台费、物流、退款归入 SKU 贡献利润，并对照三区目标配比 20/30/50。"),
         ]
     )
     db.commit()

@@ -10,7 +10,7 @@ AI Workforce / Decision Runtime
 JoyOPC Commerce Runtime
     |-- Product Master
     |-- Supplier Product
-    |-- Product Zone Engine
+    |-- Product Zone Engine + Operating OS (mix / contradiction / management cadence)
     |-- Real Data + Multimodal
     |-- Channel Accounts
     |-- Channel Publishing

@@ -12,12 +12,23 @@ ROOT_DIR = BASE_DIR.parent.parent
 load_dotenv(ROOT_DIR / ".env")
 load_dotenv(BASE_DIR / ".env")
 
-DATABASE_URL = os.getenv("JOYOPC_DATABASE_URL", f"sqlite:///{BASE_DIR / 'joyopc.db'}")
+DEFAULT_DATABASE_URL = "postgresql+psycopg://joyopc:joyopc@localhost:5432/joyopc"
+_env = os.getenv("JOYOPC_ENV", "dev").strip().lower()
+if _env == "test":
+    DATABASE_URL = os.getenv("JOYOPC_DATABASE_URL", "sqlite:///:memory:")
+else:
+    DATABASE_URL = os.getenv("JOYOPC_DATABASE_URL", DEFAULT_DATABASE_URL)
+SCHEMA_MODE = os.getenv("JOYOPC_SCHEMA_MODE", "bootstrap").strip().lower()
+if SCHEMA_MODE not in {"bootstrap", "migrate"}:
+    raise RuntimeError("JOYOPC_SCHEMA_MODE must be 'bootstrap' or 'migrate'")
 WEB_DIR = Path(os.getenv("JOYOPC_WEB_DIR", str(BASE_DIR.parent / "web"))).resolve()
 STORAGE_DIR = Path(os.getenv("JOYOPC_STORAGE_DIR", str(BASE_DIR / "storage"))).resolve()
 UPLOAD_DIR = STORAGE_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+MEDIA_DIR = STORAGE_DIR / "media"
+MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 MAX_UPLOAD_MB = int(os.getenv("JOYOPC_MAX_UPLOAD_MB", "25"))
+JOYOPC_REMBG = os.getenv("JOYOPC_REMBG", "").strip() in {"1", "true", "yes"}
 
 SALEOR_GRAPHQL_URL = os.getenv("SALEOR_GRAPHQL_URL", "").rstrip("/")
 SALEOR_APP_TOKEN = os.getenv("SALEOR_APP_TOKEN", "")

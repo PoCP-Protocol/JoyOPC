@@ -20,6 +20,47 @@ class SelectionInput(BaseModel):
     compliance_risk: float = Field(30, ge=0, le=100)
     return_risk: float = Field(30, ge=0, le=100)
     cash_cycle_days: int = Field(30, ge=0, le=365)
+    market: str = "US"
+    recommended_channel: str = "TikTok Shop"
+    soul_recipe_id: str = ""
+    has_persona: bool = False
+    memory_enabled: bool = False
+    skills: list[str] = Field(default_factory=list)
+    hw_gen: int = Field(1, ge=1, le=4)
+    module_tier: str = "Mini"
+    shell: str = ""
+    claimed_features: list[str] = Field(default_factory=list)
+    certs_held: list[str] = Field(default_factory=list)
+
+
+class StrategyCircle(BaseModel):
+    code: str
+    label: str
+    score: float
+    status: Literal["HEALTHY", "WATCH", "ALERT"]
+    note: str
+
+
+class SkuPhilosophy(BaseModel):
+    advantage_quality: Literal["FAKE", "SELF_INTOXICATED", "CREATED", "WEAK"]
+    advantage_quality_label: str
+    advantage_sources: list[str] = Field(default_factory=list)
+    advantage_source_labels: list[str] = Field(default_factory=list)
+    main_contradiction_code: str
+    main_contradiction: str
+    reliability_score: float
+    strategy: str
+    implementation: str
+    gaming_move: str
+    gaming_move_label: str
+    notes: list[str] = Field(default_factory=list)
+
+
+class MixPolicy(BaseModel):
+    exclusive_target_pct: float = Field(20, ge=0, le=100)
+    advantage_target_pct: float = Field(30, ge=0, le=100)
+    homogeneous_target_pct: float = Field(50, ge=0, le=100)
+    homogeneous_alert_pct: float = Field(65, ge=0, le=100)
 
 
 class SelectionResult(BaseModel):
@@ -33,6 +74,11 @@ class SelectionResult(BaseModel):
     risk_score: float
     reasons: list[str]
     recommended_actions: list[str]
+    philosophy: SkuPhilosophy | None = None
+    has_companion_soul: bool = False
+    needs_hardware_gate: bool = False
+    cert_gap: list[str] = Field(default_factory=list)
+    crossborder: dict | None = None
 
 
 class SelectionPolicy(BaseModel):
@@ -82,6 +128,15 @@ class CandidateCreate(BaseModel):
     compliance_risk: float = Field(30, ge=0, le=100)
     return_risk: float = Field(30, ge=0, le=100)
     cash_cycle_days: int = Field(30, ge=0, le=365)
+    soul_recipe_id: str = ""
+    has_persona: bool = False
+    memory_enabled: bool = False
+    skills: list[str] = Field(default_factory=list)
+    hw_gen: int = Field(1, ge=1, le=4)
+    module_tier: str = "Mini"
+    shell: str = ""
+    claimed_features: list[str] = Field(default_factory=list)
+    certs_held: list[str] = Field(default_factory=list)
 
 
 class CandidateDecision(BaseModel):

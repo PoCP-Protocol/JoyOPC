@@ -90,6 +90,14 @@ class AmazonAdapter(ChannelAdapter):
             "requirements": "LISTING",
             "attributes": attributes,
         }
+        if not self.connected:
+            return {
+                "status": "DRY_RUN",
+                "reason": "Amazon LWA credentials not configured; Listings Items payload accepted locally",
+                "sdk": "python-amazon-sp-api",
+                "external_sku": sku,
+                "data": payload,
+            }
         data = await self._request(
             "PUT",
             f"/listings/2021-08-01/items/{quote(self.seller_id, safe='')}/{quote(sku, safe='')}",

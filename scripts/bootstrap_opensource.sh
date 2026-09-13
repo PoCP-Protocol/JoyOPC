@@ -17,6 +17,11 @@ clone "https://github.com/saleor/saleor-platform.git" "$VENDOR/saleor-platform"
 clone "https://github.com/saleor/saleor-mcp.git" "$VENDOR/saleor-mcp"
 clone "https://github.com/clawnify/open-listing-studio.git" "$VENDOR/open-listing-studio"
 clone "https://github.com/openlinker-project/openlinker.git" "$VENDOR/openlinker"
+clone "https://github.com/KubeRiva/OMS.git" "$VENDOR/kuberiva-oms"
+clone "https://github.com/codustry/marketeer.git" "$VENDOR/marketeer"
+clone "https://github.com/lien0219/trademind-ai.git" "$VENDOR/trademind-ai"
+clone "https://github.com/ronchen0927/AI-E-Commerce-Media-Studio.git" "$VENDOR/ai-ecommerce-media-studio"
+clone "https://github.com/Ouple/product_card_processor.git" "$VENDOR/product-card-processor"
 
 cat <<'EOF'
 

@@ -9,6 +9,20 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 
 
+class ProductUnitColumns:
+    soul_recipe_id: Mapped[str] = mapped_column(String(80), default="")
+    has_persona: Mapped[bool] = mapped_column(Boolean, default=False)
+    memory_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    skills_json: Mapped[str] = mapped_column(Text, default="[]")
+    hw_gen: Mapped[int] = mapped_column(Integer, default=1)
+    module_tier: Mapped[str] = mapped_column(String(24), default="Mini")
+    shell: Mapped[str] = mapped_column(String(80), default="")
+    claimed_features_json: Mapped[str] = mapped_column(Text, default="[]")
+    certs_held_json: Mapped[str] = mapped_column(Text, default="[]")
+    cert_gap_json: Mapped[str] = mapped_column(Text, default="[]")
+    needs_hardware_gate: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 class ProductZone(str, Enum):
     EXCLUSIVE = "EXCLUSIVE"
     ADVANTAGE = "ADVANTAGE"
@@ -42,7 +56,7 @@ class Supplier(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
-class MasterProduct(Base):
+class MasterProduct(ProductUnitColumns, Base):
     __tablename__ = "master_products"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -154,7 +168,7 @@ class MarketSignal(Base):
     observed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
-class ProductCandidate(Base):
+class ProductCandidate(ProductUnitColumns, Base):
     __tablename__ = "product_candidates"
 
     id: Mapped[int] = mapped_column(primary_key=True)

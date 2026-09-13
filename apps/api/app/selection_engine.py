@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .crossborder_ai_toy import sku_ops_plan
+from .operating_os import diagnose_sku
+from .product_unit import apply_product_gates, unit_from_mapping
 from .schemas import SelectionInput, SelectionPolicy, SelectionResult
 
 
 ZONE_LABELS = {
     "EXCLUSIVE": "独占区",
-    "ADVANTAGE": "优势区",
+    "ADVANTAGE": "优质区",
     "HOMOGENEOUS": "同质区",
 }
 
@@ -69,6 +72,10 @@ class ProductZoneEngine:
             zone = "ADVANTAGE"
         else:
             zone = "HOMOGENEOUS"
+
+        unit = unit_from_mapping(x.model_dump(), market=x.market)
+        gated = apply_product_gates(zone, "HOLD", unit)
+        zone = gated["zone"]
 
         margin_score = self._margin_score(x.expected_margin_pct)
         base_score = self._clamp(
@@ -141,8 +148,12 @@ class ProductZoneEngine:
             else:
                 decision = "REJECT"
 
-        reasons: list[str] = []
-        actions: list[str] = []
+        gated = apply_product_gates(zone, decision, unit)
+        zone = gated["zone"]
+        decision = gated["decision"]
+
+        reasons: list[str] = list(gated["reasons"])
+        actions: list[str] = list(gated["recommended_actions"])
 
         if zone == "EXCLUSIVE":
             reasons.append("存在可验证的独家/控制权，优先进入独占区经营。")
@@ -169,6 +180,13 @@ class ProductZoneEngine:
 
         actions.append(f"当前建议：{decision}")
 
+        philosophy = diagnose_sku(x, zone=zone, decision=decision, risk_score=risk_score)
+        reasons.extend(philosophy.notes)
+        actions.append(philosophy.gaming_move_label)
+        actions.append(f"主要矛盾：{philosophy.main_contradiction}")
+        cb_plan = sku_ops_plan(x, zone=zone, decision=decision, channel=x.recommended_channel)
+        actions.extend(cb_plan["ops_actions"][:3])
+
         return SelectionResult(
             product_name=x.product_name,
             zone=zone,
@@ -180,4 +198,9 @@ class ProductZoneEngine:
             risk_score=round(risk_score, 1),
             reasons=reasons,
             recommended_actions=actions,
+            philosophy=philosophy,
+            has_companion_soul=bool(gated["has_companion_soul"]),
+            needs_hardware_gate=bool(gated["needs_hardware_gate"]),
+            cert_gap=list(gated["cert_gap"]),
+            crossborder=cb_plan,
         )

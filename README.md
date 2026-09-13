@@ -1,6 +1,6 @@
 # JoyOPC V0.4 — 真实渠道连接 + 商品发布 + 订单回流 + SKU级真实利润
 
-JoyOPC 是面向 AI 玩具销售型 OPC 公司的 AI-native Commerce OS。V0.4 在 V0.3 的“真实货盘 + 多模态 + 真实市场信号 + 产品三区”之上，把选品推进到真实电商交易闭环。
+JoyOPC 是面向 AI 玩具销售型 OPC 公司的 AI-native Commerce OS。V0.4 在 V0.3 的“真实货盘 + 多模态 + 真实市场信号 + 产品三区”之上，把选品推进到真实电商交易闭环。V0.5A 在此之上补齐租户列、Alembic、Inbox/Outbox 与财务账本底座，详见 `docs/V0.5A_FOUNDATION.md`。V0.5B 补上库存 / 履约 / 一件代发闭环，详见 `docs/V0.5B_FULFILLMENT.md`。
 
 ## V0.4 核心闭环
 
@@ -251,15 +251,25 @@ SKU真实贡献利润重算
 
 ## 9. 运行
 
-Windows PowerShell：
+先启动 PostgreSQL（系统默认数据库）：
 
 ```powershell
-cd JoyOPC_v0.4\apps\api
+cd D:\JoyOPC
+docker compose up -d postgres
+```
+
+再启动 API：
+
+```powershell
+cd D:\JoyOPC\apps\api
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
+copy ..\..\.env.example ..\..\.env
 uvicorn app.main:app --reload --port 8000
 ```
+
+默认连接：`postgresql+psycopg://joyopc:joyopc@localhost:5432/joyopc`。本机已有 PostgreSQL 17 时直接用该实例；也可用 `docker compose up -d postgres`（需空出 5432）。凭证写在 gitignored 的 `.env`，不要改回 SQLite。
 
 打开：
 
@@ -267,9 +277,7 @@ uvicorn app.main:app --reload --port 8000
 http://127.0.0.1:8000
 ```
 
-进入：
-
-**渠道与利润**
+`GET /api/health` 应返回 `"database": "postgresql"`。
 
 ## 10. API
 
@@ -289,6 +297,12 @@ POST /api/profit/reconcile
 GET  /api/profit/sku
 GET  /api/commerce-control-center
 POST /api/market/crawl
+GET  /api/v05a/status
+POST /api/v05a/events/inbox
+POST /api/v05a/events/outbox
+GET  /api/ops/overview
+POST /api/ops/orders/{order_id}/allocate
+POST /api/ops/fulfillments/{id}/ship
 ```
 
 V0.1–V0.3 的选品、真实货盘、市场信号、多模态、CEO审批 API 全部保留。本机已接入的 AiSoul 公开页爬虫（弱市场信号）在 V0.4 上继续可用。
