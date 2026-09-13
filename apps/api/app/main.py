@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import csv
+import os
 import hashlib
 import io
 import json
@@ -10,14 +11,16 @@ import shutil
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .config import MAX_UPLOAD_MB, UPLOAD_DIR, WEB_DIR
+from .adapters.saleor import SaleorAdapter
+from .config import MAX_UPLOAD_MB, UPLOAD_DIR, WEB_DIR, upsert_dotenv
+from .content_factory import content_factory
 from .database import Base, engine, get_db
 from .discovery_engine import CandidateIntelligenceEngine
 from .ingestion import MarketSignalFileImporter, SupplierCatalogImporter, json_dumps
@@ -49,6 +52,7 @@ from .schemas import (
     ChannelAccountCreate,
     ChannelOrderSyncRequest,
     ChannelPublishRequest,
+    ShopifyConnectRequest,
     CostEntryCreate,
     CandidateDecision,
     GoogleTrendsPull,
@@ -61,7 +65,17 @@ from .schemas import (
 )
 from .seed import seed_demo
 from .selection_engine import ProductZoneEngine
-from .channel_runtime import account_dict, check_account, publish_master_product, reconcile_profit, sku_profit, sync_orders
+from .channel_runtime import (
+    account_dict,
+    check_account,
+    first_publishable_master_product,
+    publish_master_product,
+    reconcile_profit,
+    shopify_channel_account,
+    sku_profit,
+    sync_orders,
+)
+from .adapters.channels.shopify import ShopifyAdapter, looks_like_admin_token, normalize_shop_domain
 
 app = FastAPI(title="JoyOPC API", version="0.4.0")
 app.add_middleware(
@@ -754,10 +768,116 @@ def reset_demo(db: Session = Depends(get_db)) -> dict:
     return {"status": "reset"}
 
 
+@app.get("/api/foundation")
+async def foundation(db: Session = Depends(get_db)) -> dict:
+    saleor = await SaleorAdapter().health()
+    accounts = db.scalars(select(ChannelAccount).order_by(ChannelAccount.id)).all()
+    return {
+        "kernel": saleor,
+        "channels": [account_dict(x) for x in accounts],
+        "content_factory": {"inspired_by": content_factory.source, "status": "ready"},
+        "rule": "JoyOPC composes official OSS. It does not fork Saleor or turn Shopify into the platform kernel.",
+    }
+
+
+@app.post("/api/integrations/saleor/webhooks")
+async def saleor_webhook(request: Request, saleor_event: str | None = Header(default="", alias="Saleor-Event")) -> dict:
+    payload = await request.json()
+    return {"accepted": True, "event": saleor_event or "", "order_id": payload.get("id")}
+
+
+@app.post("/api/content/listings")
+def generate_listings(payload: dict) -> dict:
+    return content_factory.generate(payload, str(payload.get("channel") or "all"))
+
+
 @app.get("/api/channels")
 def channel_accounts(db: Session = Depends(get_db)) -> list[dict]:
     rows = db.scalars(select(ChannelAccount).order_by(ChannelAccount.id)).all()
     return [account_dict(x) for x in rows]
+
+
+@app.post("/api/channels/shopify/connect")
+async def connect_shopify(payload: ShopifyConnectRequest, db: Session = Depends(get_db)) -> dict:
+    domain = normalize_shop_domain(payload.shop_url)
+    token = payload.access_token.strip()
+    if not domain:
+        raise HTTPException(400, "shop_url is required")
+    if not looks_like_admin_token(token):
+        raise HTTPException(400, "access_token must be a Shopify Admin API token (shpat_/shpca_/shpua_)")
+    account = shopify_channel_account(db)
+    if account is None:
+        raise HTTPException(404, "Shopify channel account is missing; create one first")
+    previous_token = os.environ.get("SHOPIFY_ACCESS_TOKEN", "")
+    previous_shop = os.environ.get("SHOPIFY_SHOP_URL", "")
+    os.environ["SHOPIFY_ACCESS_TOKEN"] = token
+    os.environ["SHOPIFY_SHOP_URL"] = domain
+    account.store_domain = domain
+    if payload.api_version:
+        cfg = json.loads(account.config_json or "{}") if account.config_json else {}
+        cfg["api_version"] = payload.api_version
+        account.config_json = json.dumps(cfg, ensure_ascii=False)
+    db.commit()
+    probe = ShopifyAdapter(store_domain=domain, env_prefix=account.credential_env_prefix or "SHOPIFY", api_version=payload.api_version)
+    check = await probe.check_connection()
+    if check.get("status") != "CONNECTED":
+        if previous_token:
+            os.environ["SHOPIFY_ACCESS_TOKEN"] = previous_token
+        else:
+            os.environ.pop("SHOPIFY_ACCESS_TOKEN", None)
+        if previous_shop:
+            os.environ["SHOPIFY_SHOP_URL"] = previous_shop
+        else:
+            os.environ.pop("SHOPIFY_SHOP_URL", None)
+        raise HTTPException(400, check.get("reason") or "Shopify connection failed")
+    upsert_dotenv({"SHOPIFY_SHOP_URL": domain, "SHOPIFY_ACCESS_TOKEN": token, "SHOPIFY_API_VERSION": payload.api_version})
+    live = await check_account(db, account)
+    shop = live.get("shop") or check.get("shop") or {}
+    return {"status": live.get("status"), "store_domain": domain, "shop": shop, "channel_account_id": account.id}
+
+
+@app.post("/api/channels/shopify/publish-first-master")
+async def publish_first_shopify_master(db: Session = Depends(get_db)) -> dict:
+    account = shopify_channel_account(db)
+    product = first_publishable_master_product(db)
+    if not account:
+        raise HTTPException(404, "Shopify channel account not found")
+    if not product:
+        raise HTTPException(409, "没有可发布的 Master Product（HOLD/REJECT 已排除）")
+    return await publish_master_product(db, account=account, product=product, publish_as_draft=True, channel_payload={})
+
+
+@app.post("/api/channels/shopify/publish_master/{product_id}")
+async def publish_shopify_master(product_id: int, db: Session = Depends(get_db)) -> dict:
+    account = shopify_channel_account(db)
+    product = db.get(MasterProduct, product_id)
+    if not account:
+        raise HTTPException(404, "Shopify channel account not found")
+    if not product:
+        raise HTTPException(404, "Master product not found")
+    if product.decision in {"HOLD", "REJECT"}:
+        raise HTTPException(409, f"三区决策为 {product.decision}，不允许直接发布")
+    return await publish_master_product(db, account=account, product=product, publish_as_draft=True, channel_payload={})
+
+
+@app.post("/api/channels/shopify/publish_product")
+async def publish_shopify_product_payload(payload: dict, db: Session = Depends(get_db)) -> dict:
+    account = shopify_channel_account(db)
+    if not account:
+        raise HTTPException(404, "Shopify channel account not found")
+    adapter = ShopifyAdapter(
+        store_domain=account.store_domain,
+        env_prefix=account.credential_env_prefix or "SHOPIFY",
+    )
+    body = {
+        "sku": payload.get("sku") or "UNKNOWN",
+        "name": payload.get("name") or "Untitled",
+        "category": payload.get("category") or "AI Toy",
+        "selling_price": payload.get("retail_price") or payload.get("price") or 0,
+        "publish_as_draft": True,
+        "description_html": payload.get("description_html") or "",
+    }
+    return await adapter.publish_product(body)
 
 
 @app.post("/api/channels")

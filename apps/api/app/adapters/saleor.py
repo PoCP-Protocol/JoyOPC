@@ -16,5 +16,5 @@ class SaleorAdapter:
 
     async def health(self) -> dict[str, Any]:
         if not self.graphql_url:
-            return {"connected": False, "reason": "SALEOR_GRAPHQL_URL not configured"}
-        return {"connected": False, "reason": "V0.1 adapter boundary only"}
+            return {"connected": False, "kernel": "saleor", "reason": "SALEOR_GRAPHQL_URL not configured"}
+        return {"connected": False, "kernel": "saleor", "reason": "V0.1 adapter boundary only"}

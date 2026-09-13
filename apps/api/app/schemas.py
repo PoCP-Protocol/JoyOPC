@@ -116,6 +116,12 @@ class ChannelAccountCreate(BaseModel):
     config: dict = Field(default_factory=dict)
 
 
+class ShopifyConnectRequest(BaseModel):
+    shop_url: str
+    access_token: str
+    api_version: str = "2026-07"
+
+
 class ChannelPublishRequest(BaseModel):
     master_product_id: int
     channel_account_id: int

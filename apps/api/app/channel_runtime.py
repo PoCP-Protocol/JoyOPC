@@ -11,6 +11,7 @@ from .adapters.channels.amazon import AmazonAdapter
 from .adapters.channels.mock import MockChannelAdapter
 from .adapters.channels.shopify import ShopifyAdapter
 from .adapters.channels.tiktok_shop import TikTokShopAdapter
+from .content_factory import content_factory
 from .models import (
     ChannelAccount,
     ChannelCostEntry,
@@ -22,6 +23,18 @@ from .models import (
     CommerceOrderItem,
     MasterProduct,
 )
+
+
+def shopify_channel_account(db: Session) -> ChannelAccount | None:
+    return db.scalar(select(ChannelAccount).where(ChannelAccount.channel == "Shopify").order_by(ChannelAccount.id))
+
+
+def first_publishable_master_product(db: Session) -> MasterProduct | None:
+    return db.scalar(
+        select(MasterProduct)
+        .where(MasterProduct.active.is_(True), MasterProduct.decision.notin_(("HOLD", "REJECT")))
+        .order_by(MasterProduct.opportunity_score.desc(), MasterProduct.id)
+    )
 
 
 def adapter_for(account: ChannelAccount):
@@ -128,8 +141,22 @@ async def publish_master_product(
         "category": product.category,
         "selling_price": listing.selling_price or product.retail_price,
         "publish_as_draft": publish_as_draft,
-        **channel_payload,
+        "vendor": "JoyOPC",
     }
+    if account.channel == "Shopify":
+        copy = content_factory.generate(
+            {
+                "sku": product.sku,
+                "name": product.name,
+                "category": product.category,
+                "features": [product.selection_reason] if product.selection_reason else [],
+            },
+            "shopify",
+        )
+        shopify_copy = (copy.get("listings") or {}).get("shopify") or {}
+        request_product["description_html"] = shopify_copy.get("description_html") or ""
+        request_product["tags"] = shopify_copy.get("tags") or ["ai-toy", "kids", "joyopc"]
+    request_product.update(channel_payload)
     run.request_json = json.dumps(request_product, ensure_ascii=False, default=str)
     try:
         result = await adapter_for(account).publish_product(request_product)
@@ -139,6 +166,9 @@ async def publish_master_product(
         if status in {"PUBLISHED", "SUBMITTED"}:
             listing.external_listing_id = str(result.get("external_listing_id") or "")
             listing.status = "ACTIVE" if status == "PUBLISHED" and not publish_as_draft else "SUBMITTED"
+            result["listing_status"] = listing.status
+            result["master_sku"] = product.sku
+            result["admin_url"] = result.get("admin_url") or ""
             ref = db.scalar(select(ChannelObjectRef).where(ChannelObjectRef.channel_listing_id == listing.id))
             if ref is None:
                 ref = ChannelObjectRef(channel_account_id=account.id, channel_listing_id=listing.id)
@@ -153,11 +183,13 @@ async def publish_master_product(
         else:
             listing.status = status
             run.status = "BLOCKED"
-    except Exception as exc:
+            result["listing_status"] = listing.status
+            result["master_sku"] = product.sku
+    except Exception as except_exc:
         listing.status = "ERROR"
         run.status = "FAILED"
-        run.error_message = str(exc)
-        result = {"status": "ERROR", "error": str(exc)}
+        run.error_message = str(except_exc)
+        result = {"status": "ERROR", "error": str(except_exc), "master_sku": product.sku, "listing_status": "ERROR"}
     run.completed_at = datetime.utcnow()
     db.commit()
     return result
